@@ -32,6 +32,11 @@ export function useSpeechRecognition(): UseSpeechRecognition {
   const finalTranscriptRef = useRef("");
   const timestampsRef = useRef<number[]>([]);
   const [speechEventTimestamps, setSpeechEventTimestamps] = useState<number[]>([]);
+  // Chrome's SpeechRecognition silently fires `onend` after a few seconds of
+  // silence even with continuous=true — without tracking "did the user ask to
+  // stop" we can't tell that apart from a real stop, and the mic goes dead
+  // mid-answer while the UI still looks like it's listening.
+  const wantsListeningRef = useRef(false);
 
   useEffect(() => {
     const Ctor =
@@ -44,8 +49,23 @@ export function useSpeechRecognition(): UseSpeechRecognition {
     recognition.lang = "en-US";
 
     recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      if (wantsListeningRef.current) {
+        try {
+          recognition.start();
+          return;
+        } catch {
+          // Fall through to reporting as stopped if the restart itself fails.
+        }
+      }
+      setIsListening(false);
+    };
     recognition.onerror = (event) => {
+      // "no-speech" just means silence was heard — not a real failure, and
+      // `onend` (which follows) will restart it. Anything else (permission
+      // denied, mic unavailable, etc.) is fatal — stop retrying and surface it.
+      if (event.error === "no-speech") return;
+      wantsListeningRef.current = false;
       setError(event.error);
       setIsListening(false);
     };
@@ -77,6 +97,7 @@ export function useSpeechRecognition(): UseSpeechRecognition {
   }, []);
 
   const start = useCallback(() => {
+    wantsListeningRef.current = true;
     setError(null);
     finalTranscriptRef.current = "";
     timestampsRef.current = [];
@@ -90,6 +111,7 @@ export function useSpeechRecognition(): UseSpeechRecognition {
   }, []);
 
   const stop = useCallback(() => {
+    wantsListeningRef.current = false;
     recognitionRef.current?.stop();
   }, []);
 
