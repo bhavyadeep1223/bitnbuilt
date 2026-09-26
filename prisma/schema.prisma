@@ -1,0 +1,263 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CANDIDATE
+  RECRUITER
+}
+
+enum InterviewStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  EXPIRED
+}
+
+enum ClaimType {
+  SKILL
+  TECHNOLOGY
+  PROJECT
+  EXPERIENCE
+  EDUCATION
+  CERTIFICATION
+  ACHIEVEMENT
+  CLAIM
+}
+
+enum CoverageStatus {
+  NOT_VERIFIED
+  PARTIALLY_VERIFIED
+  VERIFIED
+}
+
+enum IntegrityEventType {
+  FOCUS_LOST
+  FOCUS_RESTORED
+  TAB_HIDDEN
+  TAB_VISIBLE
+  FULLSCREEN_EXIT
+  FULLSCREEN_ENTER
+  MIC_DISCONNECT
+  MIC_RECONNECT
+  AUDIO_INPUT_CHANGE
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  supabaseId   String?     @unique
+  passwordHash String?
+  role         UserRole
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  candidate    Candidate?
+  recruiter    Recruiter?
+}
+
+model Candidate {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  resumeProfiles ResumeProfile[]
+  interviews     Interview[]
+}
+
+model Recruiter {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  company   String?
+  createdAt DateTime @default(now())
+
+  jobRoles JobRole[]
+}
+
+model JobRole {
+  id          String   @id @default(cuid())
+  recruiterId String
+  recruiter   Recruiter @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+  title       String
+  description String   @db.Text
+  createdAt   DateTime @default(now())
+
+  interviews Interview[]
+}
+
+model ResumeProfile {
+  id          String   @id @default(cuid())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  rawText     String   @db.Text
+  fileName    String?
+  parsedAt    DateTime?
+  createdAt   DateTime @default(now())
+
+  claims     ResumeClaim[]
+  interviews Interview[]
+}
+
+model ResumeClaim {
+  id              String         @id @default(cuid())
+  resumeProfileId String
+  resumeProfile   ResumeProfile  @relation(fields: [resumeProfileId], references: [id], onDelete: Cascade)
+  type            ClaimType
+  name            String
+  importance      String
+  claimedLevel    String?
+  verifiedLevel   Int?
+  coverageStatus  CoverageStatus @default(NOT_VERIFIED)
+  sourceText      String?        @db.Text
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  skillAssessments SkillAssessment[]
+  questions        Question[]
+
+  @@index([resumeProfileId])
+}
+
+model Interview {
+  id              String          @id @default(cuid())
+  candidateId     String
+  candidate       Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobRoleId       String
+  jobRole         JobRole         @relation(fields: [jobRoleId], references: [id], onDelete: Cascade)
+  resumeProfileId String
+  resumeProfile   ResumeProfile   @relation(fields: [resumeProfileId], references: [id], onDelete: Cascade)
+  status          InterviewStatus @default(PENDING)
+  sessionToken    String          @unique @default(cuid())
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime        @default(now())
+
+  questions        Question[]
+  skillAssessments SkillAssessment[]
+  timingEvents     TimingEvent[]
+  integrityEvents  IntegrityEvent[]
+  evaluationReport EvaluationReport?
+  eventLogEntries  EventLogEntry[]
+
+  @@index([candidateId])
+  @@index([sessionToken])
+}
+
+model Question {
+  id                 String       @id @default(cuid())
+  interviewId        String
+  interview          Interview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  index              Int
+  text               String       @db.Text
+  targetClaimId      String?
+  targetClaim        ResumeClaim? @relation(fields: [targetClaimId], references: [id])
+  difficulty         Int
+  questionType       String
+  generatedFromState Json?
+  createdAt          DateTime     @default(now())
+
+  answer      Answer?
+  timingEvent TimingEvent?
+
+  @@unique([interviewId, index])
+  @@index([interviewId])
+}
+
+model Answer {
+  id           String   @id @default(cuid())
+  questionId   String   @unique
+  question     Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  transcript   String   @db.Text
+  analysis     Json?
+  submittedAt  DateTime @default(now())
+}
+
+model SkillAssessment {
+  id                   String       @id @default(cuid())
+  interviewId          String
+  interview            Interview    @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  resumeClaimId        String
+  resumeClaim          ResumeClaim  @relation(fields: [resumeClaimId], references: [id], onDelete: Cascade)
+  depthLevel           Int
+  confidence           Float
+  evidence             Json
+  missingEvidence      Json
+  verifyingQuestionIds Json
+  updatedAt            DateTime     @updatedAt
+
+  @@unique([interviewId, resumeClaimId])
+}
+
+model TimingEvent {
+  id               String    @id @default(cuid())
+  interviewId      String
+  interview        Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  questionId       String    @unique
+  question         Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionEndTs    DateTime
+  responseStartTs  DateTime?
+  responseGapMs    Int?
+  answerStartTs    DateTime?
+  answerEndTs      DateTime?
+  totalDurationMs  Int?
+  pauses           Json?
+  longestPauseMs   Int?
+  avgPauseMs       Int?
+  createdAt        DateTime  @default(now())
+
+  @@index([interviewId])
+}
+
+model IntegrityEvent {
+  id          String             @id @default(cuid())
+  interviewId String
+  interview   Interview          @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  type        IntegrityEventType
+  timestamp   DateTime
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+
+  @@index([interviewId])
+}
+
+model EvaluationReport {
+  id                  String    @id @default(cuid())
+  interviewId         String    @unique
+  interview           Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  strengths           Json
+  gaps                Json
+  verifiedSkills      Json
+  partiallyVerified   Json
+  unverifiedClaims    Json
+  reasoningNotes      Json
+  consistencyNotes    Json
+  timingNotes         Json
+  integritySummary    Json
+  roleAlignment       Json
+  confidenceScore     Float
+  createdAt           DateTime  @default(now())
+}
+
+model EventLogEntry {
+  id          String    @id @default(cuid())
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  seq         Int
+  eventType   String
+  payload     Json
+  prevHash    String
+  hash        String
+  createdAt   DateTime  @default(now())
+
+  @@unique([interviewId, seq])
+  @@index([interviewId])
+}
