@@ -35,7 +35,11 @@ export async function extractResumeText(file: File): Promise<string> {
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
   const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: buffer });
+  // Serverless Node has no browser DOM, and pdf-parse's PDF.js internals
+  // reach for DOMMatrix/Path2D/ImageData even for plain text extraction on
+  // many real-world PDFs — this polyfills them via @napi-rs/canvas.
+  const { CanvasFactory } = await import("pdf-parse/worker");
+  const parser = new PDFParse({ data: buffer, CanvasFactory });
   try {
     const result = await parser.getText();
     return result.text;
